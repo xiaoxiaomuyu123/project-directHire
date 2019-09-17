@@ -143,7 +143,7 @@ exports.yyy = value  //暴露多个模块
 使用 “react-router-dom” 里的 withRouter 包装组件，就能给包装后的组件传入路由组件的 history，location，match 这三个参数。
 ### 2.11 cookie
 在发送请求的时候，不需要进行额外操作，浏览器中的 cookie 信息就会自动随着请求一起被发送到后端服务器中，cookie 中的信息时以键值对的形式存储的，所以可以用 resquest.cookies.key 来进行访问。
-### 2.12 页面重定向跳转问题
+### 2.12 页面重定向跳转及自动登录问题
 #### 2.12.1 注册和登录成功如何实现页面的跳转问题？
 根据有没有 header 来判断该跳转到哪个页面。
 - 没有 header，说明个人信息还没有完善，需要跳转到各自的信息完善界面 —— ‘bossinfor’，‘jobseekinfor’
@@ -153,11 +153,19 @@ exports.yyy = value  //暴露多个模块
     - register 和 login 组件读取到 redux 中 userState 的值，根据 redirectTo 进行重定向跳转。
 #### 2.12.2 用 Redirect 组件进行重定向和用 this.props.history.replace('/路径') 的使用场景分别是什么？
 需要浏览器自己判断自动跳转的时候，用 Redirect 这个组件；需要再页面中给按钮绑定事件，点击按钮的时候才进行跳转，就用 this.props.history.replace('/路径')。这个结论还有疑点，需要再继续查证。
+#### 2.12.3 实现自动登录功能：
+- 场景：在前端浏览器中已经登陆过了，但是关闭浏览器或刷新页面的时候，实现自动登录。
+- 解决方案： 第一次登陆的时候，后端会设置响应头，把 userid 写入前端浏览器的 cookie 中。这样，浏览器在每次发送请求的时候，都会自动携带 cookie 信息里面的 userid 发送到后端。一旦发生页面刷新或者关闭浏览器再启动的情况，如果 cookie 信息没有过期，那么在渲染页面的时候会想后端发送 ajax 请求，同时携带了 cookie 信息里面的 userid。那么后端服务器会在数据库中根据 userid 查找用户信息，返回相应的用户信息到前端，在渲染页面，这样就实现了自动登录。
 ### 2.13 如何实现退出登录的功能
 删除 cookie 中的 userid 和 redux 里面的 userState。具体方法：
 - 删除 cookie 中的 userid 可以使用 “js-cookies” 这个库，用 `Cookies.remove('userid')`
 - 删除 redux 中的 userState：
+修改任何 redux 中的 state 都必须最受流程：分发 action，触发 reducer 来进行改变。
 ### 2.13 父子组件见得通信
+### 2.14 如何实现在 message 组件中点击用户头像，跳转到 chat 页面。
+首先需要明确不同的用户跳转到的 chat 页面是不同的。那么，我们如何来标记不同的用户呢？用的是 userid。具体做法是在 main 组件中注册 chat 的路由。此时 chat 组建的路由 path 的形式和其他组件的不一样。   
+`<Route path='/chat/:userid' component={Chat}></Route>`  
+`:userid` 实际上是一个占位符，用来标记不同用户锁掉转的不同网址。后面如何使用这个参数呢？在 UserList 组件中的 Card 组件绑定点击事件。这个绑定的事件的内容是：要用到路由组件的 `history.push('/chat/${userid}')`
 
 ## 3. 后端
 ### 3.1 数据库：mongdb
@@ -172,14 +180,87 @@ exports.yyy = value  //暴露多个模块
 
 ### 3.3 前端使用 get 方法发送请求，后端如何在 url 中解析出想要的参数？
 ### 3.4 实时聊天的功能怎么实现？
+#### 3.4 1 利用 socketIO 实现前后端通信
 用 socket.io 这个库实现，前后端应用都要下载，它能实现多人远程实时聊天的库。
-- socket.io 包装的是 H5 websocket 和 轮询。如果是新版的浏览器，就使用 H5 websocket，老的浏览器就使用轮询。
+- socket.io 包装的是 H5 websocket 和 轮询。如果是新版的浏览器，就使用 H5 websocket，老的浏览器就使用轮询。HTTP x协议只能由浏览器向服务器端发送消息，但是实时聊天需要 浏览器和服务器在一个平等的位置上，进行相互通信，也就是，希望浏览器在向服务器端发送请求的同时，服务器也可以向浏览器发送请求，传输消息。
     - 使用了单例对象，实现只对下面的代码调用一次。
     ```
     // 连接服务器，得到代表连接的 socket 对象
     const socket = io("ws://localhost:8080");
     ```
-- 聊天消息的内容要用数据库存起来。
+- 聊天消息的内容要用数据库存起来。  
+
+**具体做法是：**
+1. **服务器和客户端分别引入 socketIO 模块。**  
+但是要注意服务器端的引入方法：新建 socketIO 文件夹，在该文件夹新疆 socketio_server.js 文件。下面是该文件的内容，`require('socket.io')` 是一个函数，需要传入参数 server。传入这个参数并执行之后，才会返回一个 io 对象。该文件导出的是一个函数，函数的参数是 express 的服务器 server。那么怎么得到这个 server 呢？在后端 bin 文件夹的 www.js 文件中进行引用这个socket。引用的位置是，在设置好服务器后，也就是 `var server = http.createServer(app);` 的后面引用这个 socketio —— `require('../socketio/socket_server')(server);` 直接引用文件，但是注意，该文件返回的是一个下面这样的函数，所以后面要传入创建好的服务器 server。
+```
+module.export = function(server) {
+    const io = require('socket.io')(server)
+}
+```
+客户端引用的方法就是正常引入 `import io from "socket.io-client"` 在 index.js 入口文件中引入这个前端的 socketIO.js 文件。`import "../../socketIO/socketIO"`
+也就是说，无论客户端还是服务器端先要产生一个 io。  
+
+2. **客户端连接服务器**
+浏览器端的连接方法：`const socket = io('ws://loaclhost:20000');`     
+3. **服务器监视是否有客户端连接进服务器**  
+传入的 socket 是连接对象？是什么呢？是连接吗？
+```
+module.exports = function (server) {
+    const io = require('socket.io')(server)
+
+    // 监视客户端和服务器的连接
+    io.on('connection', function(socket) {
+        console.log("有一个客户端连接上了服务器")
+    })
+}
+```  
+4. 客户端发送消息和服务器端接收消息：emit 是指分发消息  
+- 客户端发送消息：`socket.emit('sendMsgFromClient', {name: 'abc'});`
+- 服务器端接收消息并进行处理，处理之后再向客户端发送消息：  
+```// 绑定监听，用来监听客户端发送过来的消息
+        socket.on('sendMsgFromClient', function(data) {
+            console.log('服务器接收到客户端发送的消息：', data);
+
+            // 接收到数据后，对数据进行处理
+            data.name = data.name.toUpperCase();
+
+            // 服务器端向客户端发送消息
+            socket.emit('receiveMsgFromServer', data)
+            console.log("服务器向客户端发送了消息：", data)
+```
+完整的代码：
+```
+module.exports = function (server) {
+    const io = require('socket.io')(server);
+
+    // 监视客户端和服务器的连接
+    io.on('connection', function(socket) {
+        console.log("有一个客户端连接上了服务器")
+
+        // 绑定监听，用来监听客户端发送过来的消息
+        socket.on('sendMsgFromClient', function(data) {
+            console.log('服务器接收到客户端发送的消息：', data);
+
+            // 接收到数据后，对数据进行处理
+            data.name = data.name.toUpperCase();
+
+            // 服务器端向客户端发送消息
+            socket.emit('receiveMsgFromServer', data)
+            console.log("服务器向客户端发送了消息：", data)
+
+        })
+    })
+}
+```
+- 客户端接收客户端发送的消息  
+`// 绑定监听接受服务器发送的消息
+socket.on('receiveMsgFromServer', function(data) {
+    console.log("客户端接收到服务器发送的消息：", data)
+})`
+这样就完成了前后端的通信。
+
+#### 3.4.
 ### 3.5 实时聊天出现延迟，发送消息不能及时显示在界面上，需要刷新或者发送下一条的时候才能显示
 实际上不是延迟显示在界面上，而是被底部的发送信息的组件挡住了，我们看不见了。用 css 样式，设置消息显示的内容的 margin-botton 为 50px，问题就解决了。
 
@@ -206,3 +287,6 @@ response.send() 这条语句执行以后，也就是已经向前端发送完数�
 `const userid = request.cookies.userid`
 - node 后端不能用扩展运算符 `...`
 - Object.assign(obj1, obj2, obj3) 将多个对象合并，返回合并后的对象
+
+# 4. 亮点
+## 4.1 跨域问题
